@@ -233,6 +233,105 @@ if not os.path.exists(minecraft_directory):
 def print_status(status):
     print(f"[*] {status}")
 
+def find_java_versions():
+    java_paths = []
+
+    # 1. Java from PATH
+    java_from_path = shutil.which("java")
+    if java_from_path:
+        java_paths.append(java_from_path)
+
+    # 2. JAVA_HOME
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        java_exe = os.path.join(java_home, "bin", "java.exe")
+        if os.path.exists(java_exe):
+            java_paths.append(java_exe)
+
+    # 3. Common Windows Java installation directories
+    search_dirs = [
+        r"C:\Program Files\Java",
+        r"C:\Program Files\Eclipse Adoptium",
+        r"C:\Program Files\Eclipse Foundation",
+        r"C:\Program Files\Microsoft",
+        r"C:\Program Files\Amazon Corretto",
+        r"C:\Program Files\BellSoft",
+        r"C:\Program Files\Zulu",
+        r"C:\Program Files\OpenJDK",
+        r"C:\Program Files\AdoptOpenJDK",
+    ]
+
+    for base_dir in search_dirs:
+        if not os.path.exists(base_dir):
+            continue
+
+        for root, dirs, files in os.walk(base_dir):
+            if "java.exe" in files:
+                java_exe = os.path.join(root, "java.exe")
+                java_paths.append(java_exe)
+
+    # Remove duplicates
+    java_paths = list(dict.fromkeys(
+        os.path.abspath(path) for path in java_paths
+        if os.path.exists(path)
+    ))
+
+    return java_paths
+
+
+def get_java_version(java_path):
+    try:
+        result = subprocess.run(
+            [java_path, "-version"],
+            capture_output=True,
+            text=True
+        )
+
+        # Java prints its version to stderr
+        output = result.stderr + result.stdout
+
+        for line in output.splitlines():
+            if 'version "' in line:
+                version = line.split('version "')[1].split('"')[0]
+                return version
+
+        return "Unknown"
+
+    except Exception:
+        return "Unknown"
+
+
+def select_java():
+    java_paths = find_java_versions()
+
+    if not java_paths:
+        print("\n❌ No Java installations were found.")
+        sys.exit()
+
+    java_options = []
+
+    for path in java_paths:
+        version = get_java_version(path)
+        java_options.append(
+            f"Java {version}  —  {path}"
+        )
+
+    selected_index = show_menu(
+        java_options,
+        title="[Select Java Version]"
+    )
+
+    if selected_index is None:
+        print("Java selection cancelled.")
+        sys.exit()
+
+    selected_java = java_paths[selected_index]
+    selected_version = get_java_version(selected_java)
+
+    print(f"\n[*] Selected Java {selected_version}")
+    print(f"[*] Java path: {selected_java}")
+
+    return selected_java
 
 version_folder = os.path.join(minecraft_directory, "versions", version_id)
 
@@ -297,17 +396,15 @@ if is_fabric or version_id >= '1.17.1':
 else:
     active_flags = optimization_flags
 
+java_path = select_java()
+
 options = {
     "username": username,
     "uuid": user_uuid,
     "token": "",
     "jvmArguments": [f"-Xmx{ram_allocate}G", f"-Xms{ram_allocate}G"],
     "gameDirectory": instance_directory,
-    "executablePath": (
-        (shutil.which("java") or os.path.join(os.environ.get("JAVA_HOME", ""), "bin", "java.exe"))
-        if os.name == "nt"
-        else (shutil.which("java") or r"/usr/lib/jvm/java-26-openjdk/bin/java")
-    )
+    "executablePath": java_path
 }
 
 # the launch command
